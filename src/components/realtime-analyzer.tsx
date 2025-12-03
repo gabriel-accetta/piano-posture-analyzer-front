@@ -6,20 +6,37 @@ import { Button } from "@/components/ui/button"
 import { AngleRecommendationsModal } from "@/components/angle-recommendations-modal"
 import { Video, VideoOff, Info, Activity } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { HandRealtimeAnalysisResponse, HandRealtimeAnalysisResult } from "@/types/hand"
+import { parseHandAnalysisResponse } from "@/lib/parsings"
 
 interface RealtimeAnalyzerProps {
   type: "body" | "hand"
 }
 
+interface AnalysisResponse {
+  status: "success" | "error"
+  analysis: HandRealtimeAnalysisResponse[] | any[]
+}
+
 export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
   const [isStreaming, setIsStreaming] = useState(false)
   const [showModal, setShowModal] = useState(false)
-  const [currentStatus, setCurrentStatus] = useState<string>("Ready to analyze")
+  const [leftHandAnalysisResults, setLeftHandAnalysisResults] = useState<HandRealtimeAnalysisResult | null>(null)
+  const [rightHandAnalysisResults, setRightHandAnalysisResults] = useState<HandRealtimeAnalysisResult | null>(null)
+  const [bodyAnalysisResults, setBodyAnalysisResults] = useState<any[] | null>(null) // TODO: Define appropriate type for body analysis results
+
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const requestRef = useRef<number | undefined>(undefined)
   const processingCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const lastSendTime = useRef<number>(0)
+  const FPS_LIMIT = 8
+  const INTERVAL = 1000 / FPS_LIMIT
+
+  // FOR LOGGIN DATA TODO: REMOVE LATER
+  const lastLogTime = useRef<number>(0)
+  const LOG_INTERVAL = 5000 // ms
 
   useEffect(() => {
     return () => {
@@ -55,8 +72,7 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
   }
 
   const connectWebSocket = () => {
-    // Connect to Python API WebSocket endpoint
-    const wsUrl = `ws://localhost:8000/ws/${type}`
+    const wsUrl = `ws://localhost:8000/${type === "hand" ? "hand" : "posture"}/ws/realtime`
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
 
@@ -67,21 +83,32 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
 
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data)
-        
-        // Handle processed frame
-        if (data.frame && canvasRef.current) {
-          const ctx = canvasRef.current.getContext("2d")
-          const img = new Image()
-          img.onload = () => {
-            ctx?.drawImage(img, 0, 0)
-          }
-          img.src = `data:image/jpeg;base64,${data.frame}`
+        const data: AnalysisResponse = JSON.parse(event.data)
+
+        // FOR LOGGIN DATA TODO: REMOVE LATER
+        const now = Date.now()
+        if (now - lastLogTime.current >= LOG_INTERVAL) {
+          console.log("WebSocket message:", data)
+          lastLogTime.current = now
         }
 
-        // Handle status updates
-        if (data.status) {
-          setCurrentStatus(data.status)
+
+        if (type === "hand") {
+          const analysis = parseHandAnalysisResponse(data.analysis)
+
+          if (Array.isArray(analysis)) {
+            analysis.forEach((result: HandRealtimeAnalysisResult) => {
+              if (result.handedness === "Left") {
+                setLeftHandAnalysisResults(result)
+              } else if (result.handedness === "Right") {
+                setRightHandAnalysisResults(result)
+              }
+            })
+          } else {
+            console.warn("Expected `data.analysis` to be an array for hand type; got:", analysis)
+          }
+        } else if (type === "body") {
+          setBodyAnalysisResults(data.analysis)
         }
       } catch (error) {
         console.error("Error parsing server message:", error)
@@ -90,7 +117,6 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
 
     ws.onerror = (error) => {
       console.error("WebSocket error:", error)
-      // Could show a toast or error state here
     }
 
     ws.onclose = () => {
@@ -101,18 +127,32 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
   const sendFrame = () => {
     if (!videoRef.current || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
 
+    // Throttle sending to reduce load
+    const now = Date.now()
+    if (now - lastSendTime.current < INTERVAL) {
+      requestRef.current = requestAnimationFrame(sendFrame)
+      return
+    }
+
     if (processingCanvasRef.current) {
       const ctx = processingCanvasRef.current.getContext("2d")
       if (ctx) {
         ctx.drawImage(videoRef.current, 0, 0)
-        // Convert frame to base64
-        const base64Data = processingCanvasRef.current.toDataURL("image/jpeg", 0.6)
-        
-        // Send to server
-        wsRef.current.send(JSON.stringify({
-          image: base64Data.split(",")[1], // Remove data URL prefix
-          timestamp: Date.now()
-        }))
+        // Send as Blob (binary) to avoid Base64/JSON overhead
+        processingCanvasRef.current.toBlob(
+          (blob) => {
+            if (blob && wsRef.current?.readyState === WebSocket.OPEN) {
+              try {
+                wsRef.current.send(blob)
+                lastSendTime.current = now
+              } catch (e) {
+                console.error("Failed to send frame blob:", e)
+              }
+            }
+          },
+          "image/jpeg",
+          0.7
+        )
       }
     }
 
@@ -142,7 +182,9 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
     }
 
     setIsStreaming(false)
-    setCurrentStatus("Ready to analyze")
+    setLeftHandAnalysisResults(null)
+    setRightHandAnalysisResults(null)
+    setBodyAnalysisResults(null)
   }
 
   return (
@@ -178,18 +220,110 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
               </div>
             )}
 
-            {/* Status Overlay */}
+            {/* Status Overlay: show left hand (top-left) and right hand (top-right) */}
+            {isStreaming && type === "hand" && (
+              <>
+                <div className="absolute left-4 top-4 w-56 p-2 rounded-lg bg-white/80 shadow">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Activity className="h-3 w-3" />
+                      <span className="text-sm font-semibold">Left Hand</span>
+                    </div>
+                    <Badge
+                      variant={leftHandAnalysisResults?.classification === "Correct" ? "default" : "secondary"}
+                      className={leftHandAnalysisResults?.classification === "Correct" ? "bg-emerald-500" : "bg-amber-500"}
+                    >
+                      {leftHandAnalysisResults?.classification ?? "—"}
+                    </Badge>
+                  </div>
+
+                  <div className="mt-2 text-xs text-muted-foreground space-y-1">
+                    <div>
+                      <strong>Wrist:</strong>{" "}
+                      {leftHandAnalysisResults ? `${leftHandAnalysisResults.features.wristAngle.toFixed(1)}°` : "—"}
+                    </div>
+                    <div>
+                      <strong>Avg Finger Curvature:</strong>{" "}
+                      {leftHandAnalysisResults
+                        ? (
+                            leftHandAnalysisResults.features.fingerCurvature.reduce((s, v) => s + v, 0) /
+                            Math.max(1, leftHandAnalysisResults.features.fingerCurvature.length)
+                          ).toFixed(1) + "°"
+                        : "—"}
+                    </div>
+                    <div>
+                      <strong>Avg Joint Angle:</strong>{" "}
+                      {leftHandAnalysisResults
+                        ? `${(
+                            leftHandAnalysisResults.features.fingerJointAngles.reduce((s, v) => s + v, 0) /
+                            Math.max(1, leftHandAnalysisResults.features.fingerJointAngles.length)
+                          ).toFixed(1)}°`
+                        : "—"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="absolute right-4 top-4 w-56 p-2 rounded-lg bg-white/80 shadow text-right">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold">Right Hand</span>
+                    </div>
+                    <Badge
+                      variant={rightHandAnalysisResults?.classification === "Correct" ? "default" : "secondary"}
+                      className={rightHandAnalysisResults?.classification === "Correct" ? "bg-emerald-500" : "bg-amber-500"}
+                    >
+                      {rightHandAnalysisResults?.classification ?? "—"}
+                    </Badge>
+                  </div>
+
+                  <div className="mt-2 text-xs text-muted-foreground space-y-1">
+                    <div>
+                      <strong>Wrist:</strong>{" "}
+                      {rightHandAnalysisResults ? `${rightHandAnalysisResults.features.wristAngle.toFixed(1)}°` : "—"}
+                    </div>
+                    <div>
+                      <strong>Avg Finger Curvature:</strong>{" "}
+                      {rightHandAnalysisResults
+                        ? (
+                            rightHandAnalysisResults.features.fingerCurvature.reduce((s, v) => s + v, 0) /
+                            Math.max(1, rightHandAnalysisResults.features.fingerCurvature.length)
+                          ).toFixed(1) + "°"
+                        : "—"}
+                    </div>
+                    <div>
+                      <strong>Avg Joint Angle:</strong>{" "}
+                      {rightHandAnalysisResults
+                        ? `${(
+                            rightHandAnalysisResults.features.fingerJointAngles.reduce((s, v) => s + v, 0) /
+                            Math.max(1, rightHandAnalysisResults.features.fingerJointAngles.length)
+                          ).toFixed(1)}°`
+                        : "—"}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Body overlay: simple boilerplate until body type is defined */}
+            {isStreaming && type === "body" && (
+              <div className="absolute left-4 top-4 w-56 p-2 rounded-lg bg-white/80 shadow">
+                <div className="flex items-center gap-2">
+                  <Activity className="h-3 w-3" />
+                  <span className="text-sm font-semibold">Body Posture</span>
+                </div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                  <div>Body analysis schema not defined yet.</div>
+                  <div className="mt-1">Results will appear here when available.</div>
+                </div>
+              </div>
+            )}
+
+            {/* Live badge */}
             {isStreaming && (
-              <div className="absolute left-4 top-4 flex gap-2">
+              <div className="absolute left-4 bottom-4">
                 <Badge variant="default" className="gap-2">
                   <Activity className="h-3 w-3" />
                   Live
-                </Badge>
-                <Badge
-                  variant={currentStatus === "Correct" ? "default" : "secondary"}
-                  className={currentStatus === "Correct" ? "bg-emerald-500" : "bg-amber-500"}
-                >
-                  {currentStatus}
                 </Badge>
               </div>
             )}
