@@ -8,32 +8,26 @@ import { Button } from "@/components/ui/button"
 import { AngleRecommendationsModal } from "@/components/angle-recommendations-modal"
 import { Upload, Play, Info, CheckCircle2, AlertCircle } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { HandVideoAnalysisResult } from "@/types/hand"
+import { parseVideoAnalysisResponse } from "@/lib/parsings"
 
 interface VideoAnalyzerProps {
   type: "body" | "hand"
 }
 
-interface Classification {
-  frame: number
-  status: string
-}
-
-interface AnalysisResult {
-  right_hand_classification?: Classification[]
-  left_hand_classification?: Classification[]
-  body_posture_classification?: Classification[]
-}
-
 export function VideoAnalyzer({ type }: VideoAnalyzerProps) {
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [results, setResults] = useState<AnalysisResult | null>(null)
   const [showModal, setShowModal] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [handAnalysisResults, setHandAnalysisResults] = useState<HandVideoAnalysisResult | null>(null)
+  const [bodyAnalysisResults, setBodyAnalysisResults] = useState<any | null>(null) // TODO: Define appropriate type for body analysis results
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setVideoFile(e.target.files[0])
-      setResults(null)
+      setHandAnalysisResults(null)
+      setUploadProgress(null)
     }
   }
 
@@ -41,39 +35,59 @@ export function VideoAnalyzer({ type }: VideoAnalyzerProps) {
     if (!videoFile) return
 
     setIsAnalyzing(true)
+    setUploadProgress(0)
 
-    // Simulate API call - replace with actual API endpoint
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+    const endpoint = type === "hand" ? "/hand/analyze-video" : "/posture/analyze-video"
+    const url = `http://localhost:8000${endpoint}`
 
-    // Mock results based on type
-    if (type === "hand") {
-      setResults({
-        right_hand_classification: [
-          [5, "Correct"],
-          [10, "Correct"],
-          [15, "Slightly Curved"],
-          [20, "Correct"],
-        ] as any,
-        left_hand_classification: [
-          [5, "Flat Fingers"],
-          [10, "Flat Fingers"],
-          [15, "Correct"],
-          [20, "Flat Fingers"],
-        ] as any,
+    const form = new FormData()
+    form.append("file", videoFile)
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open("POST", url)
+
+        xhr.upload.onprogress = (ev) => {
+          if (ev.lengthComputable) {
+            const percent = Math.round((ev.loaded / ev.total) * 100)
+            setUploadProgress(percent)
+          }
+        }
+
+        xhr.onload = () => {
+          console.log("Upload complete", xhr)
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const json = JSON.parse(xhr.responseText)
+              console.log("Response JSON:", json)
+              const parsed = parseVideoAnalysisResponse(json)
+              console.log("Parsed Results:", parsed)
+
+              // TODO: Differentiate between hand and body results
+              setHandAnalysisResults(parsed)
+              resolve()
+            } catch (err) {
+              console.error("Failed to parse response", err)
+              reject(err)
+            }
+          } else {
+            console.error("analyze-video failed", xhr.responseText)
+            reject(new Error(`Upload failed: ${xhr.status}`))
+          }
+        }
+
+        xhr.onerror = () => reject(new Error("Network error during upload"))
+        xhr.onabort = () => reject(new Error("Upload aborted"))
+
+        xhr.send(form)
       })
-    } else {
-      setResults({
-        body_posture_classification: [
-          [5, "Correct"],
-          [10, "Slouching"],
-          [15, "Slouching"],
-          [20, "Correct"],
-          [25, "Too Far Forward"],
-        ] as any,
-      })
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setIsAnalyzing(false)
+      setUploadProgress(null)
     }
-
-    setIsAnalyzing(false)
   }
 
   const getStatusColor = (status: string) => {
@@ -134,10 +148,21 @@ export function VideoAnalyzer({ type }: VideoAnalyzerProps) {
                 {isAnalyzing ? "Analyzing..." : "Analyze"}
               </Button>
             </div>
+            {uploadProgress !== null && (
+              <div className="mt-3">
+                <div className="h-2 w-full rounded bg-muted/40 overflow-hidden border border-border">
+                  <div
+                    className="h-full bg-primary transition-all"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+                <div className="mt-1 text-sm text-muted-foreground">{uploadProgress}%</div>
+              </div>
+            )}
           </div>
 
           {/* Results Section */}
-          {results && (
+          {(handAnalysisResults || bodyAnalysisResults) && (
             <div className="space-y-4">
               <Alert>
                 <AlertDescription>
@@ -154,20 +179,18 @@ export function VideoAnalyzer({ type }: VideoAnalyzerProps) {
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-3">
-                        {(results.right_hand_classification as any)?.map(
-                          ([timestamp, status]: [number, string], idx: number) => (
-                            <div
-                              key={idx}
-                              className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3"
-                            >
-                              <span className="font-mono text-sm text-muted-foreground">{timestamp}s</span>
-                              <div className={`flex items-center gap-2 font-medium ${getStatusColor(status)}`}>
-                                {getStatusIcon(status)}
-                                {status}
-                              </div>
+                        {(handAnalysisResults?.rightHand ?? []).map((item, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3"
+                          >
+                            <span className="font-mono text-sm text-muted-foreground">{item.timestamp}s</span>
+                            <div className={`flex items-center gap-2 font-medium ${getStatusColor(item.classification)}`}>
+                              {getStatusIcon(item.classification)}
+                              {item.classification}
                             </div>
-                          ),
-                        )}
+                          </div>
+                        ))}
                       </div>
                     </CardContent>
                   </Card>
@@ -179,20 +202,18 @@ export function VideoAnalyzer({ type }: VideoAnalyzerProps) {
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-3">
-                        {(results.left_hand_classification as any)?.map(
-                          ([timestamp, status]: [number, string], idx: number) => (
-                            <div
-                              key={idx}
-                              className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3"
-                            >
-                              <span className="font-mono text-sm text-muted-foreground">{timestamp}s</span>
-                              <div className={`flex items-center gap-2 font-medium ${getStatusColor(status)}`}>
-                                {getStatusIcon(status)}
-                                {status}
-                              </div>
+                        {(handAnalysisResults?.leftHand ?? []).map((item, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3"
+                          >
+                            <span className="font-mono text-sm text-muted-foreground">{item.timestamp}s</span>
+                            <div className={`flex items-center gap-2 font-medium ${getStatusColor(item.classification)}`}>
+                              {getStatusIcon(item.classification)}
+                              {item.classification}
                             </div>
-                          ),
-                        )}
+                          </div>
+                        ))}
                       </div>
                     </CardContent>
                   </Card>
@@ -204,7 +225,7 @@ export function VideoAnalyzer({ type }: VideoAnalyzerProps) {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      {(results.body_posture_classification as any)?.map(
+                      {(bodyAnalysisResults?.body_posture_classification as any ?? []).map(
                         ([timestamp, status]: [number, string], idx: number) => (
                           <div
                             key={idx}

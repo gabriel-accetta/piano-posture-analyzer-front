@@ -19,3 +19,28 @@ export interface HandRealtimeAnalysisResponse {
   features: number[];
   label: string;
 }
+export interface HandVideoAnalysisResult {
+  leftHand: {
+    timestamp: number;
+    features: HandFeatures;
+    classification: HandClassification;
+  }[];
+  rightHand: {
+    timestamp: number;
+    features: HandFeatures;
+    classification: HandClassification;
+  }[];
+}
+
+export interface HandVideoAnalysisResponse {
+  left_hand_classification: {
+    timestamp: number;
+    features: number[];
+    label: string;
+  }[];
+  right_hand_classification: {
+    timestamp: number;
+    features: number[];
+    label: string;
+  }[];
+}

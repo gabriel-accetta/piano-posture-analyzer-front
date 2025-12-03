@@ -7,7 +7,7 @@ import { AngleRecommendationsModal } from "@/components/angle-recommendations-mo
 import { Video, VideoOff, Info, Activity } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { HandRealtimeAnalysisResponse, HandRealtimeAnalysisResult } from "@/types/hand"
-import { parseHandAnalysisResponse } from "@/lib/parsings"
+import { parseHandRealtimeAnalysisResponse } from "@/lib/parsings"
 
 interface RealtimeAnalyzerProps {
   type: "body" | "hand"
@@ -94,7 +94,7 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
 
 
         if (type === "hand") {
-          const analysis = parseHandAnalysisResponse(data.analysis)
+          const analysis = parseHandRealtimeAnalysisResponse(data.analysis)
 
           if (Array.isArray(analysis)) {
             analysis.forEach((result: HandRealtimeAnalysisResult) => {
