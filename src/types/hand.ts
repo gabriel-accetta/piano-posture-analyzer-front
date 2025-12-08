@@ -8,6 +8,7 @@ export interface HandFeatures {
 
 export type HandClassification = "Correct" | "Flat Fingers" | "High Wrist" | "Dropped Wrist" | "Collapsed Fingers";
 
+// Realtime Analysis
 export interface HandRealtimeAnalysisResult {
   handedness: Handedness;
   features: HandFeatures;
@@ -19,6 +20,8 @@ export interface HandRealtimeAnalysisResponse {
   features: number[];
   label: string;
 }
+
+// Video Analysis
 export interface HandVideoAnalysisResult {
   leftHand: {
     timestamp: number;

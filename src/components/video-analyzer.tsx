@@ -2,14 +2,18 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { AngleRecommendationsModal } from "@/components/angle-recommendations-modal"
 import { Upload, Play, Info, CheckCircle2, AlertCircle } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { HandVideoAnalysisResult } from "@/types/hand"
-import { parseVideoAnalysisResponse } from "@/lib/parsings"
+import { parseBodyVideoAnalysisResponse, parseHandVideoAnalysisResponse } from "@/lib/parsings"
+import { BodyVideoAnalysisResult } from "@/types/body"
+import { ClassificationProgressBar } from "@/components/classification-progress-bar"
+import { OverallAnalysis } from '@/components/overall-analysis'
+import { Analysis } from '@/types/analysis'
 
 interface VideoAnalyzerProps {
   type: "body" | "hand"
@@ -21,15 +25,37 @@ export function VideoAnalyzer({ type }: VideoAnalyzerProps) {
   const [showModal, setShowModal] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [handAnalysisResults, setHandAnalysisResults] = useState<HandVideoAnalysisResult | null>(null)
-  const [bodyAnalysisResults, setBodyAnalysisResults] = useState<any | null>(null) // TODO: Define appropriate type for body analysis results
+  const [bodyAnalysisResults, setBodyAnalysisResults] = useState<BodyVideoAnalysisResult[] | null>(null)
+  const [overallAnalysis, setOverallAnalysis] = useState<Analysis | null>(null)
+  const [isSummarizing, setIsSummarizing] = useState(false)
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setVideoFile(e.target.files[0])
       setHandAnalysisResults(null)
       setUploadProgress(null)
+      // clear previous body results when selecting new file
+      setBodyAnalysisResults(null)
     }
   }
+
+  // Create object URL for preview and clean up when file changes/unmounts
+  useEffect(() => {
+    if (!videoFile) {
+      setVideoPreviewUrl(null)
+      return
+    }
+
+    const url = URL.createObjectURL(videoFile)
+    setVideoPreviewUrl(url)
+
+    return () => {
+      URL.revokeObjectURL(url)
+      setVideoPreviewUrl(null)
+    }
+  }, [videoFile])
 
   const handleAnalyze = async () => {
     if (!videoFile) return
@@ -37,8 +63,7 @@ export function VideoAnalyzer({ type }: VideoAnalyzerProps) {
     setIsAnalyzing(true)
     setUploadProgress(0)
 
-    const endpoint = type === "hand" ? "/hand/analyze-video" : "/posture/analyze-video"
-    const url = `http://localhost:8000${endpoint}`
+    const url = `http://localhost:8000/${type}/analyze-video`
 
     const form = new FormData()
     form.append("file", videoFile)
@@ -60,12 +85,20 @@ export function VideoAnalyzer({ type }: VideoAnalyzerProps) {
           if (xhr.status >= 200 && xhr.status < 300) {
             try {
               const json = JSON.parse(xhr.responseText)
-              console.log("Response JSON:", json)
-              const parsed = parseVideoAnalysisResponse(json)
-              console.log("Parsed Results:", parsed)
+              console.log("analyze-video response", json)
 
-              // TODO: Differentiate between hand and body results
-              setHandAnalysisResults(parsed)
+              if (type === "hand") {
+                const parsed = parseHandVideoAnalysisResponse(json)
+                console.log("Parsed hand analysis results", parsed)
+                setHandAnalysisResults(parsed)
+                // build summary and request overall analysis
+                summarizeAndRequestOverallFromHand(parsed)
+              } else if (type === "body") {
+                const parsed = parseBodyVideoAnalysisResponse(json)
+                setBodyAnalysisResults(parsed)
+                summarizeAndRequestOverallFromBody(parsed)
+              }
+              
               resolve()
             } catch (err) {
               console.error("Failed to parse response", err)
@@ -90,6 +123,70 @@ export function VideoAnalyzer({ type }: VideoAnalyzerProps) {
     }
   }
 
+  const buildSummaryFromSegments = (segments: Array<{ classification: string; [k: string]: any }>) => {
+    if (!segments || segments.length === 0) return '0% Correct'
+    const counts: Record<string, number> = {}
+    segments.forEach((s) => {
+      const key = s.classification || 'Unknown'
+      counts[key] = (counts[key] || 0) + 1
+    })
+    const total = segments.length
+    const parts = Object.entries(counts).map(([cls, cnt]) => `${Math.round((cnt / total) * 100)}% ${cls}`)
+    return parts.join(', ')
+  }
+
+  const summarizeAndRequestOverallFromHand = async (handResults: HandVideoAnalysisResult) => {
+    try {
+      setIsSummarizing(true)
+      setOverallAnalysis(null)
+      const left = (handResults?.leftHand ?? [])
+      const right = (handResults?.rightHand ?? [])
+      const combined = [...left, ...right]
+      const summary = buildSummaryFromSegments(combined)
+      await requestOverallAnalysis(summary)
+    } catch (err) {
+      console.error('Failed to summarize hand results', err)
+    } finally {
+      setIsSummarizing(false)
+    }
+  }
+
+  const summarizeAndRequestOverallFromBody = async (bodyResults: BodyVideoAnalysisResult[]) => {
+    try {
+      setIsSummarizing(true)
+      setOverallAnalysis(null)
+      const summary = buildSummaryFromSegments(bodyResults ?? [])
+      await requestOverallAnalysis(summary)
+    } catch (err) {
+      console.error('Failed to summarize body results', err)
+    } finally {
+      setIsSummarizing(false)
+    }
+  }
+
+  const requestOverallAnalysis = async (summary: string) => {
+    try {
+      const res = await fetch('/api/gpt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: summary, type }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        console.error('Overall analysis endpoint error', json)
+        return
+      }
+      // basic runtime validation
+      if (json && json.classification && Array.isArray(json.feedbacks) && Array.isArray(json.materials)) {
+        setOverallAnalysis(json as Analysis)
+      } else {
+        console.error('Invalid overall analysis response', json)
+      }
+    } catch (err) {
+      console.error('Failed to request overall analysis', err)
+    }
+  }
+
   const getStatusColor = (status: string) => {
     if (status === "Correct") return "text-emerald-500"
     return "text-amber-500"
@@ -98,6 +195,16 @@ export function VideoAnalyzer({ type }: VideoAnalyzerProps) {
   const getStatusIcon = (status: string) => {
     if (status === "Correct") return <CheckCircle2 className="h-4 w-4" />
     return <AlertCircle className="h-4 w-4" />
+  }
+
+  const handleBarClick = (timestamp: number, _classification: string) => {
+    if (videoRef.current) {
+      // seek to the timestamp and play for context
+      videoRef.current.currentTime = timestamp
+      // try to play so the user sees the context; ignore promise
+      const p = videoRef.current.play()
+      if (p && typeof p.catch === "function") p.catch(() => {})
+    }
   }
 
   return (
@@ -148,6 +255,18 @@ export function VideoAnalyzer({ type }: VideoAnalyzerProps) {
                 {isAnalyzing ? "Analyzing..." : "Analyze"}
               </Button>
             </div>
+
+            {/* Video preview */}
+            {videoPreviewUrl && (
+              <div className="mt-4">
+                <video
+                  ref={videoRef}
+                  src={videoPreviewUrl}
+                  controls
+                  className="w-full max-h-64 rounded-md border border-border bg-black"
+                />
+              </div>
+            )}
             {uploadProgress !== null && (
               <div className="mt-3">
                 <div className="h-2 w-full rounded bg-muted/40 overflow-hidden border border-border">
@@ -171,77 +290,43 @@ export function VideoAnalyzer({ type }: VideoAnalyzerProps) {
               </Alert>
 
               {type === "hand" ? (
-                <div className="grid gap-4 md:grid-cols-2">
-                  {/* Right Hand */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-lg">Right Hand</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        {(handAnalysisResults?.rightHand ?? []).map((item, idx) => (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3"
-                          >
-                            <span className="font-mono text-sm text-muted-foreground">{item.timestamp}s</span>
-                            <div className={`flex items-center gap-2 font-medium ${getStatusColor(item.classification)}`}>
-                              {getStatusIcon(item.classification)}
-                              {item.classification}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
+                <div className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <div className="mb-2 text-sm font-medium">Left Hand Timeline</div>
+                      <ClassificationProgressBar
+                        data={(handAnalysisResults?.leftHand ?? []).map((it) => ({ timestamp: it.timestamp, classification: it.classification }))}
+                        onBarClick={handleBarClick}
+                      />
+                    </div>
 
-                  {/* Left Hand */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-lg">Left Hand</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        {(handAnalysisResults?.leftHand ?? []).map((item, idx) => (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3"
-                          >
-                            <span className="font-mono text-sm text-muted-foreground">{item.timestamp}s</span>
-                            <div className={`flex items-center gap-2 font-medium ${getStatusColor(item.classification)}`}>
-                              {getStatusIcon(item.classification)}
-                              {item.classification}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
+                    <div>
+                      <div className="mb-2 text-sm font-medium">Right Hand Timeline</div>
+                      <ClassificationProgressBar
+                        data={(handAnalysisResults?.rightHand ?? []).map((it) => ({ timestamp: it.timestamp, classification: it.classification }))}
+                        onBarClick={handleBarClick}
+                      />
+                    </div>
+                  </div>
                 </div>
               ) : (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg">Body Posture Timeline</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {(bodyAnalysisResults?.body_posture_classification as any ?? []).map(
-                        ([timestamp, status]: [number, string], idx: number) => (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3"
-                          >
-                            <span className="font-mono text-sm text-muted-foreground">{timestamp}s</span>
-                            <div className={`flex items-center gap-2 font-medium ${getStatusColor(status)}`}>
-                              {getStatusIcon(status)}
-                              {status}
-                            </div>
-                          </div>
-                        ),
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
+                <div className="space-y-4">
+                  <div>
+                    <div className="mb-2 text-sm font-medium">Body Timeline</div>
+                    <ClassificationProgressBar
+                      data={(bodyAnalysisResults ?? []).map((it) => ({ timestamp: it.timestamp, classification: it.classification }))}
+                      onBarClick={handleBarClick}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Overall analysis */}
+              {(overallAnalysis || isSummarizing) && (
+                <div className="mt-6">
+                  {isSummarizing && <div className="mb-2 text-sm text-muted-foreground">Summarizing results...</div>}
+                  {overallAnalysis && <OverallAnalysis {...overallAnalysis} />}
+                </div>
               )}
             </div>
           )}

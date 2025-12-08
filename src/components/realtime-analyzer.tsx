@@ -7,7 +7,8 @@ import { AngleRecommendationsModal } from "@/components/angle-recommendations-mo
 import { Video, VideoOff, Info, Activity } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { HandRealtimeAnalysisResponse, HandRealtimeAnalysisResult } from "@/types/hand"
-import { parseHandRealtimeAnalysisResponse } from "@/lib/parsings"
+import { parseBodyRealtimeAnalysisResponse, parseHandRealtimeAnalysisResponse } from "@/lib/parsings"
+import { BodyRealtimeAnalysisResponse, BodyRealtimeAnalysisResult } from "@/types/body"
 
 interface RealtimeAnalyzerProps {
   type: "body" | "hand"
@@ -15,7 +16,7 @@ interface RealtimeAnalyzerProps {
 
 interface AnalysisResponse {
   status: "success" | "error"
-  analysis: HandRealtimeAnalysisResponse[] | any[]
+  analysis: HandRealtimeAnalysisResponse[] | BodyRealtimeAnalysisResponse
 }
 
 export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
@@ -23,7 +24,7 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
   const [showModal, setShowModal] = useState(false)
   const [leftHandAnalysisResults, setLeftHandAnalysisResults] = useState<HandRealtimeAnalysisResult | null>(null)
   const [rightHandAnalysisResults, setRightHandAnalysisResults] = useState<HandRealtimeAnalysisResult | null>(null)
-  const [bodyAnalysisResults, setBodyAnalysisResults] = useState<any[] | null>(null) // TODO: Define appropriate type for body analysis results
+  const [bodyAnalysisResults, setBodyAnalysisResults] = useState<BodyRealtimeAnalysisResult | null>(null)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -72,7 +73,7 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
   }
 
   const connectWebSocket = () => {
-    const wsUrl = `ws://localhost:8000/${type === "hand" ? "hand" : "posture"}/ws/realtime`
+    const wsUrl = `ws://localhost:8000/${type}/ws/realtime`
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
 
@@ -94,6 +95,10 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
 
 
         if (type === "hand") {
+          if (!Array.isArray(data.analysis)) {
+            console.warn("Expected `data.analysis` to be an array for hand type; got:", data.analysis)
+            return
+          }
           const analysis = parseHandRealtimeAnalysisResponse(data.analysis)
 
           if (Array.isArray(analysis)) {
@@ -108,7 +113,12 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
             console.warn("Expected `data.analysis` to be an array for hand type; got:", analysis)
           }
         } else if (type === "body") {
-          setBodyAnalysisResults(data.analysis)
+          if (Array.isArray(data.analysis)) {
+            console.warn("Expected `data.analysis` to be an object for body type; got:", data.analysis)
+            return
+          }
+          const analysis = parseBodyRealtimeAnalysisResponse(data.analysis)
+          setBodyAnalysisResults(analysis)
         }
       } catch (error) {
         console.error("Error parsing server message:", error)
@@ -304,16 +314,43 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
               </>
             )}
 
-            {/* Body overlay: simple boilerplate until body type is defined */}
+            {/* Body overlay: show live body features and classification */}
             {isStreaming && type === "body" && (
-              <div className="absolute left-4 top-4 w-56 p-2 rounded-lg bg-white/80 shadow">
-                <div className="flex items-center gap-2">
-                  <Activity className="h-3 w-3" />
-                  <span className="text-sm font-semibold">Body Posture</span>
+              <div className="absolute left-4 top-4 w-64 p-3 rounded-lg bg-white/80 shadow">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Activity className="h-3 w-3" />
+                    <span className="text-sm font-semibold">Body Posture</span>
+                  </div>
+                  <Badge
+                    variant={bodyAnalysisResults?.classification === "Correct" ? "default" : "secondary"}
+                    className={bodyAnalysisResults?.classification === "Correct" ? "bg-emerald-500" : "bg-amber-500"}
+                  >
+                    {bodyAnalysisResults?.classification ?? "—"}
+                  </Badge>
                 </div>
-                <div className="mt-2 text-xs text-muted-foreground">
-                  <div>Body analysis schema not defined yet.</div>
-                  <div className="mt-1">Results will appear here when available.</div>
+
+                <div className="mt-2 text-xs text-muted-foreground space-y-1">
+                  <div>
+                    <strong>Torso Inclination:</strong>{" "}
+                    {bodyAnalysisResults ? `${bodyAnalysisResults.features.torsoInclination.toFixed(1)}°` : "—"}
+                  </div>
+                  <div>
+                    <strong>Neck Angle:</strong>{" "}
+                    {bodyAnalysisResults ? `${bodyAnalysisResults.features.neckAngle.toFixed(1)}°` : "—"}
+                  </div>
+                  <div>
+                    <strong>Shoulder Tension:</strong>{" "}
+                    {bodyAnalysisResults ? `${bodyAnalysisResults.features.shoulderTension.toFixed(1)}` : "—"}
+                  </div>
+                  <div>
+                    <strong>Elbow Angle:</strong>{" "}
+                    {bodyAnalysisResults ? `${bodyAnalysisResults.features.elbowAngle.toFixed(1)}°` : "—"}
+                  </div>
+                  <div>
+                    <strong>Forearm Slope:</strong>{" "}
+                    {bodyAnalysisResults ? `${bodyAnalysisResults.features.forearmSlope.toFixed(1)}°` : "—"}
+                  </div>
                 </div>
               </div>
             )}

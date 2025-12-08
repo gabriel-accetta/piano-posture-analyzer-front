@@ -1,0 +1,72 @@
+[
+  {
+    "type": "Book",
+    "title": "The Art of Piano Playing - Heinrich Neuhaus",
+    "description": "A classic text on piano technique emphasizing natural hand positions and relaxation to avoid tension-related injuries.",
+    "link": "https://www.amazon.com.br/Art-Piano-Playing-Heinrich-Neuhaus/dp/1871082455",
+    "thumbnail": "https://m.media-amazon.com/images/I/51bneKX4qZL._SY466_.jpg"
+  },
+  {
+    "type": "Book",
+    "title": "The Virtuoso Pianist in Sixty Exercises",
+    "description": "A collection of exercises designed to improve finger strength and independence while promoting ergonomic hand posture, also known as Hanon Exercises.",
+    "link": "https://www.hanon-online.com/",
+    "thumbnail": "https://m.media-amazon.com/images/I/81xQNYw--oL._AC_UF1000,1000_QL80_.jpg"
+  },
+  {
+    "type": "Book",
+    "title": "Biomechanics of Piano Technique",
+    "description": "A technical overview of musculoskeletal coordination in pianists, including solutions for high wrist and excessive tension.",
+    "link": "https://example.com/biomechanics-piano",
+    "thumbnail": "https://picsum.photos/200"
+  },
+  {
+    "type": "Video",
+    "title": "Neutral Wrist Position: Preventing High and Dropped Wrists",
+    "description": "Illustrates the optimal wrist–forearm relationship and offers corrective drills for dynamic stability during passagework.",
+    "link": "https://example.com/wrist-position-video",
+    "thumbnail": "https://picsum.photos/200"
+  },
+  {
+    "type": "Article",
+    "title": "Postural Alignment for Efficient Piano Performance",
+    "description": "Discusses spinal alignment, pelvic balance, and torso support to counteract slouching and sustain functional posture.",
+    "link": "https://example.com/posture-alignment",
+    "thumbnail": "https://picsum.photos/200"
+  },
+  {
+    "type": "Video",
+    "title": "Head and Neck Neutrality at the Piano",
+    "description": "Covers ergonomic adjustments to prevent forward-head posture and maintain visual alignment with the score and keyboard.",
+    "link": "https://example.com/head-forward-video",
+    "thumbnail": "https://picsum.photos/200"
+  },
+  {
+    "type": "Book",
+    "title": "Healthy Piano Technique: A Physiological Approach",
+    "description": "Provides a comprehensive method for reducing muscular compensation patterns, including raised-shoulder tendencies.",
+    "link": "https://example.com/healthy-technique",
+    "thumbnail": "https://picsum.photos/200"
+  },
+  {
+    "type": "Article",
+    "title": "Shoulder Mechanics in Keyboard Performance",
+    "description": "Analyzes scapular function and upper-limb load distribution to address chronic shoulder elevation during playing.",
+    "link": "https://example.com/shoulder-mechanics",
+    "thumbnail": "https://picsum.photos/200"
+  },
+  {
+    "type": "Video",
+    "title": "Elbow Alignment: Avoiding Dropped and Raised Elbows",
+    "description": "Demonstrates coordinated arm movement and lateral reach strategies to maintain optimal elbow height.",
+    "link": "https://example.com/elbow-alignment-video",
+    "thumbnail": "https://picsum.photos/200"
+  },
+  {
+    "type": "Book",
+    "title": "Motor Learning for Pianists",
+    "description": "Examines neurological and motor-learning principles that support durable corrections of technical inefficiencies.",
+    "link": "https://example.com/motor-learning",
+    "thumbnail": "https://picsum.photos/200"
+  }
+]
