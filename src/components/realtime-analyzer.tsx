@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { AngleRecommendationsModal } from "@/components/angle-recommendations-modal"
-import { Video, VideoOff, Info, Activity } from "lucide-react"
+import { Video, VideoOff, Info, Activity, Upload, CheckCircle, AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { HandRealtimeAnalysisResponse, HandRealtimeAnalysisResult } from "@/types/hand"
 import { parseBodyRealtimeAnalysisResponse, parseHandRealtimeAnalysisResponse } from "@/lib/parsings"
@@ -22,12 +22,14 @@ interface AnalysisResponse {
 export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
   const [isStreaming, setIsStreaming] = useState(false)
   const [showModal, setShowModal] = useState(false)
+  const [isVideoMode, setIsVideoMode] = useState(false)
   const [leftHandAnalysisResults, setLeftHandAnalysisResults] = useState<HandRealtimeAnalysisResult | null>(null)
   const [rightHandAnalysisResults, setRightHandAnalysisResults] = useState<HandRealtimeAnalysisResult | null>(null)
   const [bodyAnalysisResults, setBodyAnalysisResults] = useState<BodyRealtimeAnalysisResult | null>(null)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const requestRef = useRef<number | undefined>(undefined)
   const processingCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -176,6 +178,11 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
       videoRef.current.srcObject = null
     }
 
+    if (videoRef.current && isVideoMode) {
+      videoRef.current.pause()
+      videoRef.current.src = ""
+    }
+
     if (wsRef.current) {
       wsRef.current.close()
       wsRef.current = null
@@ -191,9 +198,44 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
     }
 
     setIsStreaming(false)
+    setIsVideoMode(false)
     setLeftHandAnalysisResults(null)
     setRightHandAnalysisResults(null)
     setBodyAnalysisResults(null)
+  }
+
+  const handleVideoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file || !videoRef.current) return
+
+    const url = URL.createObjectURL(file)
+    videoRef.current.src = url
+    setIsVideoMode(true)
+
+    videoRef.current.onloadedmetadata = () => {
+      if (videoRef.current && canvasRef.current) {
+        canvasRef.current.width = videoRef.current.videoWidth
+        canvasRef.current.height = videoRef.current.videoHeight
+
+        if (!processingCanvasRef.current) {
+          processingCanvasRef.current = document.createElement('canvas')
+        }
+        processingCanvasRef.current.width = videoRef.current.videoWidth
+        processingCanvasRef.current.height = videoRef.current.videoHeight
+      }
+    }
+
+    videoRef.current.oncanplay = () => {
+      setIsStreaming(true)
+      connectWebSocket()
+      if (videoRef.current) {
+        videoRef.current.play()
+      }
+    }
+
+    videoRef.current.onended = () => {
+      stopStreaming()
+    }
   }
 
   return (
@@ -235,7 +277,13 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
                 <div className="absolute left-4 top-4 w-56 p-2 rounded-lg bg-white/80 shadow">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Activity className="h-3 w-3" />
+                      {leftHandAnalysisResults?.classification === "Correct" ? (
+                        <CheckCircle className="h-4 w-4 text-emerald-500" />
+                      ) : leftHandAnalysisResults?.classification ? (
+                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                      ) : (
+                        <Activity className="h-3 w-3" />
+                      )}
                       <span className="text-sm font-semibold">Left Hand</span>
                     </div>
                     <Badge
@@ -275,6 +323,13 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
                 <div className="absolute right-4 top-4 w-56 p-2 rounded-lg bg-white/80 shadow text-right">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
+                      {rightHandAnalysisResults?.classification === "Correct" ? (
+                        <CheckCircle className="h-4 w-4 text-emerald-500" />
+                      ) : rightHandAnalysisResults?.classification ? (
+                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                      ) : (
+                        <Activity className="h-3 w-3" />
+                      )}
                       <span className="text-sm font-semibold">Right Hand</span>
                     </div>
                     <Badge
@@ -318,7 +373,13 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
               <div className="absolute left-4 top-4 w-64 p-3 rounded-lg bg-white/80 shadow">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Activity className="h-3 w-3" />
+                    {bodyAnalysisResults?.classification === "Correct" ? (
+                      <CheckCircle className="h-4 w-4 text-emerald-500" />
+                    ) : bodyAnalysisResults?.classification ? (
+                      <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    ) : (
+                      <Activity className="h-3 w-3" />
+                    )}
                     <span className="text-sm font-semibold">Body Posture</span>
                   </div>
                   <Badge
@@ -368,14 +429,32 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
           {/* Controls */}
           <div className="flex justify-center gap-4">
             {!isStreaming ? (
-              <Button onClick={startStreaming} size="lg" className="gap-2">
-                <Video className="h-4 w-4" />
-                Start Camera
-              </Button>
+              <>
+                <Button onClick={startStreaming} size="lg" className="gap-2">
+                  <Video className="h-4 w-4" />
+                  Start Camera
+                </Button>
+                <Button 
+                  onClick={() => fileInputRef.current?.click()} 
+                  size="lg" 
+                  variant="outline" 
+                  className="gap-2"
+                >
+                  <Upload className="h-4 w-4" />
+                  Upload Video
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="video/*"
+                  onChange={handleVideoUpload}
+                  className="hidden"
+                />
+              </>
             ) : (
               <Button onClick={stopStreaming} variant="destructive" size="lg" className="gap-2">
                 <VideoOff className="h-4 w-4" />
-                Stop Camera
+                Stop {isVideoMode ? "Video" : "Camera"}
               </Button>
             )}
           </div>
