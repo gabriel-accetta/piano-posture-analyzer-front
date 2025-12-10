@@ -88,12 +88,12 @@ export function VideoAnalyzer({ type }: VideoAnalyzerProps) {
               console.log("analyze-video response", json)
 
               if (type === "hand") {
+
                 const parsed = parseHandVideoAnalysisResponse(json)
-                console.log("Parsed hand analysis results", parsed)
                 setHandAnalysisResults(parsed)
-                // build summary and request overall analysis
                 summarizeAndRequestOverallFromHand(parsed)
               } else if (type === "body") {
+
                 const parsed = parseBodyVideoAnalysisResponse(json)
                 setBodyAnalysisResults(parsed)
                 summarizeAndRequestOverallFromBody(parsed)

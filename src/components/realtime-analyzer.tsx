@@ -56,7 +56,6 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
             canvasRef.current.width = videoRef.current.videoWidth
             canvasRef.current.height = videoRef.current.videoHeight
             
-            // Initialize processing canvas
             if (!processingCanvasRef.current) {
               processingCanvasRef.current = document.createElement('canvas')
             }
@@ -86,7 +85,7 @@ export function RealtimeAnalyzer({ type }: RealtimeAnalyzerProps) {
       try {
         const data: AnalysisResponse = JSON.parse(event.data)
 
-        // FOR LOGGIN DATA TODO: REMOVE LATER
+        // FOR LOGGING DATA TODO: REMOVE LATER
         const now = Date.now()
         if (now - lastLogTime.current >= LOG_INTERVAL) {
           console.log("WebSocket message:", data)
